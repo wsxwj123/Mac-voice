@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+models/
+.DS_Store
+
+# 本机开发笔记 / 私有配置（含个人路径，不开源）
+STATUS.md
+keytest.py
+com.wsxwj.*.plist

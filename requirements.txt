@@ -1,0 +1,14 @@
+# STT server
+funasr
+torch
+torchaudio
+soundfile
+fastapi
+uvicorn
+
+# IME client (macOS)
+sounddevice
+pynput
+numpy
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
