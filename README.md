@@ -54,7 +54,8 @@ cp llm_config.example.json llm_config.json
 ```
 
 - **云端（推荐）**：阿里 `qwen-flash` 最便宜（比 deepseek 便宜约 10×），整理这种轻任务绰绰有余。零 RAM 占用。
-- **本地**：装 [Ollama](https://ollama.com)，`ollama pull qwen3:4b`（~2.5GB / ~3GB RAM，中文+指令遵循同尺寸最强），`base_url` 填 `http://localhost:11434/v1`。
+- **本地**：装 [Ollama](https://ollama.com)，`ollama pull qwen2.5:3b`（~2GB），`base_url` 填 `http://localhost:11434/v1`，`model` 填 `qwen2.5:3b`。整理 200–500ms（模型常驻后）。
+  > ⚠️ 别用 `qwen3:4b`——它是 hybrid thinking 版，ollama 上 `/no_think` 和 `think:false` 都关不掉思考，每次整理要 30–60s。
 
 prompt 内置「只修剪不重写」约束（去口癖/补标点/顺句，禁止扩写重排，±20% 长度，标签隔离防注入），可在 `voice_ime.py` 的 `POLISH_PROMPT` 改。
 

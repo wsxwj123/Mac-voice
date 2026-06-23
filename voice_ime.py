@@ -15,6 +15,7 @@
 前置：STT 服务(stt_server.py)在 127.0.0.1:7788；已获 辅助功能 + 麦克风 权限。
 """
 import os
+import re
 import sys
 import json
 import time
@@ -158,9 +159,10 @@ def llm_polish(text: str) -> str:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {LLM_CONFIG.get('api_key', '')}",
         })
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
         out = (data["choices"][0]["message"]["content"] or "").strip()
+        out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
         return out or text
     except Exception as e:
         print(f"   ↳ ⚠️ LLM 整理失败，注入原文: {e}", file=sys.stderr)

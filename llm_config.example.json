@@ -7,6 +7,7 @@
   "_local_ollama_example": {
     "base_url": "http://localhost:11434/v1",
     "api_key": "ollama",
-    "model": "qwen3:4b"
+    "model": "qwen2.5:3b",
+    "_note": "用 qwen2.5:3b（无思考链，整理 200-500ms）。别用 qwen3:4b——它是 hybrid thinking 版，ollama 上关不掉思考，每次要 30-60s。"
   }
 }
