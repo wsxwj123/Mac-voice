@@ -38,7 +38,25 @@ python stt_server.py
 python voice_ime.py
 ```
 
-点进任意输入框，**按住右 Option 说话，松手**，文字注入光标处。
+点进任意输入框：
+- **按住右 Option 说话，松手** → 注入**原文**
+- **双击左 Control 并按住说话，松手** → LLM **整理后**注入（去口癖、补标点、顺句，不重写）
+
+整理模式下声波浮窗变青色。整理需先配置 LLM（见下），未配置则注入原文。
+
+### LLM 整理（可选）
+
+双击左 Control 触发的整理需要一个 OpenAI 兼容的 LLM。复制配置并填写：
+
+```bash
+cp llm_config.example.json llm_config.json
+# 编辑 base_url / api_key / model
+```
+
+- **云端（推荐）**：阿里 `qwen-flash` 最便宜（比 deepseek 便宜约 10×），整理这种轻任务绰绰有余。零 RAM 占用。
+- **本地**：装 [Ollama](https://ollama.com)，`ollama pull qwen3:4b`（~2.5GB / ~3GB RAM，中文+指令遵循同尺寸最强），`base_url` 填 `http://localhost:11434/v1`。
+
+prompt 内置「只修剪不重写」约束（去口癖/补标点/顺句，禁止扩写重排，±20% 长度，标签隔离防注入），可在 `voice_ime.py` 的 `POLISH_PROMPT` 改。
 
 ### 权限（macOS）
 
@@ -64,7 +82,7 @@ VOICE_IME_DEVICE='AirPods' python voice_ime.py   # 名字片段匹配
 | `NO_INJECT=1` | 只识别打印，不注入 |
 | `NO_OVERLAY=1` | 不显示声波浮窗 |
 | `VOICE_IME_DEVICE` | 指定输入设备（名字片段或索引） |
-| `VOICE_IME_HOTKEY` | 热键，默认 `right_option`。没有右 Option 的键盘可改：`right_cmd` / `right_ctrl` / `right_shift` / `left_option` / `caps_lock` |
+| `VOICE_IME_HOTKEY` | 原文录音热键，默认 `right_option`。没有右 Option 的键盘可改：`right_cmd` / `right_ctrl` / `right_shift` / `left_option` / `caps_lock`（整理热键固定为双击左 Control） |
 
 ## 打包成 .app（推荐）
 

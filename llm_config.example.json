@@ -1,0 +1,12 @@
+{
+  "_comment": "复制为 llm_config.json 并填写。OpenAI 兼容。云端示例=阿里qwen-flash；本地示例见下方注释。",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "api_key": "sk-在此填入你的key",
+  "model": "qwen-flash",
+
+  "_local_ollama_example": {
+    "base_url": "http://localhost:11434/v1",
+    "api_key": "ollama",
+    "model": "qwen3:4b"
+  }
+}

@@ -8,7 +8,8 @@ models/
 # 构建产物
 *.app
 
-# 本机开发笔记 / 私有配置（含个人路径，不开源）
+# 本机开发笔记 / 私有配置（含个人路径/密钥，不开源）
 STATUS.md
 keytest.py
 com.wsxwj.*.plist
+llm_config.json
