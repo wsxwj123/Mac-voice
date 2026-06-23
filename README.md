@@ -64,19 +64,33 @@ VOICE_IME_DEVICE='AirPods' python voice_ime.py   # 名字片段匹配
 | `NO_INJECT=1` | 只识别打印，不注入 |
 | `NO_OVERLAY=1` | 不显示声波浮窗 |
 | `VOICE_IME_DEVICE` | 指定输入设备（名字片段或索引） |
+| `VOICE_IME_HOTKEY` | 热键，默认 `right_option`。没有右 Option 的键盘可改：`right_cmd` / `right_ctrl` / `right_shift` / `left_option` / `caps_lock` |
 
-## 开机自启（可选）
+## 打包成 .app（推荐）
 
-`launchd/` 下有两个 plist 模板。替换占位符后安装：
+把客户端包成一个 `.app`，权限按 bundle 归属（比裸 python 更稳），可双击启动、设为登录项。STT 服务仍单独跑。
 
 ```bash
-# 把 __PROJECT_DIR__ 换成本仓库绝对路径，__PYTHON__ 换成 .venv/bin/python 绝对路径
-cp launchd/*.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.macvoice.stt.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.macvoice.ime.plist
+./build_app.sh            # 默认用 ./.venv/bin/python
+# 或指定: ./build_app.sh /绝对路径/python
+open Mac-voice.app        # 启动
 ```
 
-> **注意**：launchd 启动的是 python 二进制，macOS 的麦克风/辅助功能权限按可执行文件授予，需要给那个 python 单独授权。无 .app 包的后台 python 在麦克风权限上可能受 TCC 限制——若授不上，仍用终端手动运行。
+这是个**壳 app**：bundle 里只放 Info.plist + 启动器，调用本机 venv 跑 `voice_ime.py`，不打包 Python 依赖（依赖留在 venv）。所以换机器需重新 `build_app.sh`。
+
+首次运行去 系统设置→隐私与安全性 给 **Mac-voice** 授权 辅助功能 + 麦克风。
+
+### 开机自启
+
+把 `Mac-voice.app` 拖进 系统设置→通用→登录项，或：
+
+```bash
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Mac-voice.app", hidden:true}'
+```
+
+STT 服务用 `launchd/io.macvoice.stt.plist` 模板自启（替换占位符后 `launchctl bootstrap gui/$(id -u) ...`）。
+
+> 备选：`launchd/io.macvoice.ime.plist` 也能直接跑 python，但 launchd 的裸 python 在麦克风权限（TCC）上可能授不上，所以推荐 .app。
 
 ## 已知限制
 

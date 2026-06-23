@@ -54,8 +54,19 @@ from PyObjCTools import AppHelper
 STT_URL = "http://127.0.0.1:7788/transcribe_file"
 HEALTH_URL = "http://127.0.0.1:7788/health"
 SAMPLE_RATE = 16000          # SenseVoice 要求 16kHz
-HOTKEY = keyboard.Key.alt_r  # 右 Option，按住录音
 MIN_DURATION = 0.3           # 短于此忽略（防误触）
+
+# 热键可配置：VOICE_IME_HOTKEY=right_cmd 等。没有右 Option 的键盘换一个即可。
+HOTKEY_MAP = {
+    "right_option": keyboard.Key.alt_r,
+    "left_option": keyboard.Key.alt_l,
+    "right_cmd": keyboard.Key.cmd_r,
+    "right_ctrl": keyboard.Key.ctrl_r,
+    "right_shift": keyboard.Key.shift_r,
+    "caps_lock": keyboard.Key.caps_lock,
+}
+_hotkey_name = os.environ.get("VOICE_IME_HOTKEY", "right_option")
+HOTKEY = HOTKEY_MAP.get(_hotkey_name, keyboard.Key.alt_r)
 DEVICE = os.environ.get("VOICE_IME_DEVICE") or None
 NO_INJECT = os.environ.get("NO_INJECT") == "1"
 NO_OVERLAY = os.environ.get("NO_OVERLAY") == "1"
@@ -375,7 +386,8 @@ def main():
         _overlay = Overlay()
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
-    print("热键：按住【右 Option】说话，松手识别。Ctrl-C 退出。\n")
+    print(f"热键：按住【{_hotkey_name}】说话，松手识别。"
+          f"(改键 VOICE_IME_HOTKEY，可选 {'/'.join(HOTKEY_MAP)})\n")
     try:
         AppHelper.runEventLoop()
     except KeyboardInterrupt:
