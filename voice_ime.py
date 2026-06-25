@@ -159,7 +159,13 @@ def llm_polish(text: str) -> str:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {LLM_CONFIG.get('api_key', '')}",
         })
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        # 本地地址绕过系统代理（http_proxy 会把 localhost 也转发导致 502）
+        if "localhost" in url or "127.0.0.1" in url:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            resp = opener.open(req, timeout=60)
+        else:
+            resp = urllib.request.urlopen(req, timeout=60)
+        with resp:
             data = json.loads(resp.read())
         out = (data["choices"][0]["message"]["content"] or "").strip()
         out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
