@@ -67,8 +67,8 @@ HOTKEY_MAP = {
     "right_ctrl": keyboard.Key.ctrl_r,
     "caps_lock": keyboard.Key.caps_lock,
 }
-_hotkey_name = os.environ.get("VOICE_IME_HOTKEY", "left_shift")
-HOTKEY = HOTKEY_MAP.get(_hotkey_name, keyboard.Key.shift_l)
+_hotkey_name = os.environ.get("VOICE_IME_HOTKEY", "left_option")
+HOTKEY = HOTKEY_MAP.get(_hotkey_name, keyboard.Key.alt_l)
 DEVICE = os.environ.get("VOICE_IME_DEVICE") or None
 NO_INJECT = os.environ.get("NO_INJECT") == "1"
 NO_OVERLAY = os.environ.get("NO_OVERLAY") == "1"
