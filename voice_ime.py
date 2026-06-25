@@ -39,6 +39,7 @@ from AppKit import (
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorStationary,
     NSApplicationActivationPolicyAccessory,
+    NSStatusBar, NSMenu, NSMenuItem, NSVariableStatusItemLength,
 )
 from Quartz import (
     CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap,
@@ -283,6 +284,36 @@ def _ui(fn):
         AppHelper.callAfter(fn)
 
 
+# ---------- 菜单栏图标 ----------
+_status_item = None
+
+
+def setup_menubar():
+    global _status_item
+    _status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
+        NSVariableStatusItemLength
+    )
+    _status_item.button().setTitle_("🎙")
+    menu = NSMenu.alloc().init()
+    info = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        f"长按 {_hotkey_name}=原文  ·  双击左Ctrl=整理", "", ""
+    )
+    info.setEnabled_(False)
+    menu.addItem_(info)
+    menu.addItem_(NSMenuItem.separatorItem())
+    quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "退出 Mac-voice", "terminate:", "q"
+    )
+    quit_item.setTarget_(NSApplication.sharedApplication())
+    menu.addItem_(quit_item)
+    _status_item.setMenu_(menu)
+
+
+def _set_icon(emoji):
+    if _status_item is not None:
+        AppHelper.callAfter(lambda: _status_item.button().setTitle_(emoji))
+
+
 # ---------- 录音 ----------
 def _audio_callback(indata, frames, time_info, status):
     global _last_rms
@@ -305,6 +336,7 @@ def start_recording(polish=False):
     _state = "recording"
     print("🎙️  录音中…（松手结束）" + ("  [整理模式]" if polish else ""))
     _ui(lambda: _overlay.show())
+    _set_icon("🔵" if polish else "🔴")
 
 
 def stop_recording():
@@ -319,6 +351,7 @@ def stop_recording():
     if not frames:
         _state = "hidden"
         _ui(lambda: _overlay.hide())
+        _set_icon("🎙")
         return
     audio = np.concatenate(frames, axis=0).reshape(-1)
     duration = len(audio) / SAMPLE_RATE
@@ -326,6 +359,7 @@ def stop_recording():
         print(f"（太短 {duration:.2f}s，忽略）")
         _state = "hidden"
         _ui(lambda: _overlay.hide())
+        _set_icon("🎙")
         return
 
     print(f"⏳ 识别中… ({duration:.1f}s)")
@@ -369,6 +403,7 @@ def _transcribe(audio: np.ndarray, polish: bool = False):
         Path(tmp_path).unlink(missing_ok=True)
         _state = "hidden"
         _ui(lambda: _overlay.hide())
+        _set_icon("🎙")
 
 
 # ---------- 热键 ----------
@@ -473,6 +508,7 @@ def main():
     # NSApplication 主循环 + 后台 listener
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)  # 不在 Dock 显示
+    setup_menubar()
     if not NO_OVERLAY:
         _overlay = Overlay()
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)

@@ -5,7 +5,8 @@
 - **STT**: [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（本地 CPU 推理，中文 CER ~3%，支持中英日韩粤 + 情绪/事件识别）
 - **交互**: push-to-talk（长按左 Option 说话 → 松手 → 注入），录音时屏幕底部显示实时声波
 - **注入**: 剪贴板 + 模拟 ⌘V，兼容所有 App，注入后恢复原剪贴板
-- 全程本地，不联网，无云 API
+- **菜单栏图标**: 🎙 空闲 / 🔴 录音 / 🔵 整理中，含退出菜单
+- 全程本地，不联网，无云 API（整理走 LLM 时除非用云端）
 
 ## 架构
 
