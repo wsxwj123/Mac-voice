@@ -466,18 +466,41 @@ VIRTUAL_HINTS = (
 )
 
 
+def pick_input_device():
+    """跟随系统默认；若默认是虚拟驱动(Omi/WeMeet 等)则自动找真实麦克风(优先 AirPods)。
+    VOICE_IME_DEVICE 显式指定时优先。"""
+    if DEVICE is not None:
+        return DEVICE
+    try:
+        default_name = sd.query_devices(kind="input")["name"]
+    except Exception:
+        default_name = ""
+    if default_name and not any(h in default_name.lower() for h in VIRTUAL_HINTS):
+        return None  # 默认已是真实设备
+    inputs = [(i, d) for i, d in enumerate(sd.query_devices())
+              if d["max_input_channels"] > 0]
+    for i, d in inputs:  # 优先 AirPods
+        if "airpods" in d["name"].lower():
+            return i
+    for i, d in inputs:  # 其次任意非虚拟设备
+        if not any(h in d["name"].lower() for h in VIRTUAL_HINTS):
+            return i
+    return None  # 实在没有真实设备，回退默认
+
+
 def start_audio_stream():
-    """跟随系统默认输入设备（VOICE_IME_DEVICE 可覆盖，支持名字片段）"""
     global _stream
-    dev_info = sd.query_devices(DEVICE, kind="input")
+    avail = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+    print("  可用输入设备:", avail)
+    dev = pick_input_device()
+    dev_info = sd.query_devices(dev, kind="input")
     print(f"🎤 输入设备: {dev_info['name']}  (改设备: 设 VOICE_IME_DEVICE=名字片段)")
     if any(h in dev_info["name"].lower() for h in VIRTUAL_HINTS):
-        print("⚠️  默认输入是虚拟驱动，可能录不到人声。", file=sys.stderr)
-        print("   去 系统设置→声音→输入 选真实麦克风，或设 VOICE_IME_DEVICE 锁定。",
+        print("⚠️  仍是虚拟驱动，可能录不到人声。连接 AirPods 或在 声音→输入 选麦克风。",
               file=sys.stderr)
     _stream = sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-        device=DEVICE, callback=_audio_callback,
+        device=dev, callback=_audio_callback,
     )
     _stream.start()
 

@@ -39,6 +39,7 @@ cat > "$APP/Contents/MacOS/Mac-voice" <<LAUNCHER
 #!/bin/bash
 cd "$PROJECT_DIR" || exit 1
 mkdir -p logs
+export PYTHONUNBUFFERED=1
 exec "$PYTHON" voice_ime.py >> logs/app.log 2>&1
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Mac-voice"
