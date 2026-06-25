@@ -57,17 +57,18 @@ HEALTH_URL = "http://127.0.0.1:7788/health"
 SAMPLE_RATE = 16000          # SenseVoice 要求 16kHz
 MIN_DURATION = 0.3           # 短于此忽略（防误触）
 
-# 热键可配置：VOICE_IME_HOTKEY=right_cmd 等。没有右 Option 的键盘换一个即可。
+# 原文录音热键可配置：VOICE_IME_HOTKEY=right_option 等。默认长按左 Shift。
 HOTKEY_MAP = {
+    "left_shift": keyboard.Key.shift_l,
+    "right_shift": keyboard.Key.shift_r,
     "right_option": keyboard.Key.alt_r,
     "left_option": keyboard.Key.alt_l,
     "right_cmd": keyboard.Key.cmd_r,
     "right_ctrl": keyboard.Key.ctrl_r,
-    "right_shift": keyboard.Key.shift_r,
     "caps_lock": keyboard.Key.caps_lock,
 }
-_hotkey_name = os.environ.get("VOICE_IME_HOTKEY", "right_option")
-HOTKEY = HOTKEY_MAP.get(_hotkey_name, keyboard.Key.alt_r)
+_hotkey_name = os.environ.get("VOICE_IME_HOTKEY", "left_shift")
+HOTKEY = HOTKEY_MAP.get(_hotkey_name, keyboard.Key.shift_l)
 DEVICE = os.environ.get("VOICE_IME_DEVICE") or None
 NO_INJECT = os.environ.get("NO_INJECT") == "1"
 NO_OVERLAY = os.environ.get("NO_OVERLAY") == "1"
