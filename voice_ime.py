@@ -105,6 +105,7 @@ _recording = False
 _frames: list[np.ndarray] = []
 _lock = threading.Lock()
 _stream: "sd.InputStream | None" = None
+_stream_dev_name = None      # 当前流绑定的设备名（检测插拔变化）
 _last_rms = 0.0              # 最近音量，浮窗波形用
 _state = "hidden"           # hidden | recording
 _polish = False             # 本次录音是否走 LLM 整理
@@ -327,6 +328,11 @@ def _audio_callback(indata, frames, time_info, status):
 
 def start_recording(polish=False):
     global _recording, _state, _polish
+    try:
+        ensure_stream()  # 每次录音前确保用当前设备（耳机插拔自动跟随）
+    except Exception as e:
+        print(f"❌ 麦克风打开失败: {e}", file=sys.stderr)
+        return
     with _lock:
         if _recording:
             return
@@ -488,21 +494,34 @@ def pick_input_device():
     return None  # 实在没有真实设备，回退默认
 
 
-def start_audio_stream():
-    global _stream
-    avail = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
-    print("  可用输入设备:", avail)
+def ensure_stream():
+    """确保音频流绑定当前应选设备；设备变化(耳机插拔)则重建。每次录音前调用。"""
+    global _stream, _stream_dev_name
     dev = pick_input_device()
-    dev_info = sd.query_devices(dev, kind="input")
-    print(f"🎤 输入设备: {dev_info['name']}  (改设备: 设 VOICE_IME_DEVICE=名字片段)")
-    if any(h in dev_info["name"].lower() for h in VIRTUAL_HINTS):
-        print("⚠️  仍是虚拟驱动，可能录不到人声。连接 AirPods 或在 声音→输入 选麦克风。",
-              file=sys.stderr)
+    try:
+        name = sd.query_devices(dev, kind="input")["name"]
+    except Exception:
+        name = None
+    if _stream is not None and name == _stream_dev_name:
+        return  # 设备没变，复用现有流（无延迟）
+    if _stream is not None:  # 设备变了，关掉旧流
+        try:
+            _stream.stop()
+            _stream.close()
+        except Exception:
+            pass
+        _stream = None
+    avail = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
     _stream = sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
         device=dev, callback=_audio_callback,
     )
     _stream.start()
+    _stream_dev_name = name
+    print(f"🎤 输入设备: {name}  | 可用: {avail}")
+    if any(h in (name or "").lower() for h in VIRTUAL_HINTS):
+        print("⚠️  仍是虚拟驱动，可能录不到人声。连接 AirPods 或在 声音→输入 选麦克风。",
+              file=sys.stderr)
 
 
 def main():
@@ -514,7 +533,7 @@ def main():
         print("请先确认 STT 服务在运行。", file=sys.stderr)
         sys.exit(1)
     try:
-        start_audio_stream()
+        ensure_stream()
     except Exception as e:
         print(f"❌ 麦克风启动失败: {e}", file=sys.stderr)
         print("  → 检查 系统设置→隐私与安全性→麦克风 是否授权；", file=sys.stderr)
