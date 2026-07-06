@@ -3,6 +3,7 @@
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "api_key": "sk-在此填入你的key",
   "model": "qwen-flash",
+  "_polish_prompt_note": "可选：加 \"polish_prompt\": \"你的整理指令\" 覆盖内置的默认整理 prompt",
 
   "_local_ollama_example": {
     "base_url": "http://localhost:11434/v1",

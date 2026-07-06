@@ -39,7 +39,7 @@ from AppKit import (
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorStationary,
     NSApplicationActivationPolicyAccessory,
-    NSStatusBar, NSMenu, NSMenuItem, NSVariableStatusItemLength,
+    NSStatusBar, NSMenu, NSMenuItem, NSVariableStatusItemLength, NSAlert,
 )
 from Quartz import (
     CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap,
@@ -85,7 +85,7 @@ try:
 except Exception:
     LLM_CONFIG = None
 
-POLISH_PROMPT = """你是中文文本整理器。<原始转写>里是语音识别得到的口语文本，请仅做最小化整理：
+POLISH_PROMPT = (LLM_CONFIG or {}).get("polish_prompt") or """你是中文文本整理器。<原始转写>里是语音识别得到的口语文本，请仅做最小化整理：
 - 去除明显口癖和填充词（嗯、啊、那个、就是、然后那个、你懂的）
 - 补全标点、做必要分句
 - 顺通明显的语序混乱
@@ -287,10 +287,30 @@ def _ui(fn):
 
 # ---------- 菜单栏图标 ----------
 _status_item = None
+_menu_actions = None
+
+
+class MenuActions(NSObject):
+    def diagnose_(self, sender):
+        try:
+            stt_ok = check_service(retries=1, interval=0)
+        except Exception:
+            stt_ok = False
+        info = (
+            f"麦克风: {_stream_dev_name or '（未开始录音）'}\n"
+            f"STT 服务: {'✓ 在线' if stt_ok else '✗ 离线'}\n"
+            f"辅助功能: {'✓ 已授权' if AXIsProcessTrusted() else '✗ 未授权（注入/热键会失效）'}\n"
+            f"LLM: {(LLM_CONFIG or {}).get('model', '未配置（整理走原文）')}"
+        )
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Mac-voice 诊断")
+        alert.setInformativeText_(info)
+        alert.runModal()
 
 
 def setup_menubar():
-    global _status_item
+    global _status_item, _menu_actions
+    _menu_actions = MenuActions.alloc().init()
     _status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
         NSVariableStatusItemLength
     )
@@ -302,6 +322,11 @@ def setup_menubar():
     info.setEnabled_(False)
     menu.addItem_(info)
     menu.addItem_(NSMenuItem.separatorItem())
+    diag = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "🔍 诊断…", "diagnose:", ""
+    )
+    diag.setTarget_(_menu_actions)
+    menu.addItem_(diag)
     quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
         "退出 Mac-voice", "terminate:", "q"
     )
