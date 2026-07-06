@@ -40,6 +40,7 @@ from AppKit import (
     NSWindowCollectionBehaviorStationary,
     NSApplicationActivationPolicyAccessory,
     NSStatusBar, NSMenu, NSMenuItem, NSVariableStatusItemLength, NSAlert,
+    NSTextField, NSAlertFirstButtonReturn,
 )
 from Quartz import (
     CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap,
@@ -290,7 +291,36 @@ _status_item = None
 _menu_actions = None
 
 
+def save_api_key(key):
+    """把 API Key 写进 llm_config.json 并热更新（base_url/model 缺省用 DeepSeek）"""
+    global LLM_CONFIG
+    cfg = dict(LLM_CONFIG or {})
+    cfg.setdefault("base_url", "https://api.deepseek.com")
+    cfg.setdefault("model", "deepseek-v4-flash")
+    cfg["api_key"] = key
+    CONFIG_PATH.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    LLM_CONFIG = cfg
+    print(f"✓ 已保存 API Key（{len(key)} 字符）到 {CONFIG_PATH.name}")
+
+
 class MenuActions(NSObject):
+    def setKey_(self, sender):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("设置 API Key")
+        alert.setInformativeText_(
+            "粘贴 LLM 的 API Key（如 DeepSeek sk-...）。\n"
+            "base_url/model 缺省用 DeepSeek，可在 llm_config.json 改。"
+        )
+        field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 24))
+        field.setStringValue_((LLM_CONFIG or {}).get("api_key", ""))
+        alert.setAccessoryView_(field)
+        alert.addButtonWithTitle_("保存")
+        alert.addButtonWithTitle_("取消")
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            save_api_key(field.stringValue().strip())
+
     def diagnose_(self, sender):
         try:
             stt_ok = check_service(retries=1, interval=0)
@@ -322,6 +352,11 @@ def setup_menubar():
     info.setEnabled_(False)
     menu.addItem_(info)
     menu.addItem_(NSMenuItem.separatorItem())
+    keyitem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+        "🔑 设置 API Key…", "setKey:", ""
+    )
+    keyitem.setTarget_(_menu_actions)
+    menu.addItem_(keyitem)
     diag = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
         "🔍 诊断…", "diagnose:", ""
     )
