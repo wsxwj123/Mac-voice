@@ -3,7 +3,7 @@
 本地、隐私优先的 macOS 语音输入法。按住热键说话，松手把识别文字注入当前光标处。
 
 - **STT**: [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（本地 CPU 推理，中文 CER ~3%，支持中英日韩粤 + 情绪/事件识别）
-- **交互**: push-to-talk（长按左 Option 说话 → 松手 → 注入），录音时屏幕底部显示实时声波
+- **交互**: push-to-talk（双击左 Ctrl 按住说话 → 松手 → 注入），录音时屏幕底部显示实时声波
 - **注入**: 剪贴板 + 模拟 ⌘V，兼容所有 App，注入后恢复原剪贴板
 - **菜单栏图标**: 🎙 空闲 / 🔴 录音 / 🔵 整理中，含退出菜单
 - 全程本地，不联网，无云 API（整理走 LLM 时除非用云端）
@@ -11,7 +11,7 @@
 ## 架构
 
 ```
-长按左 Option ─▶ 麦克风采集 ─▶ 临时 wav ─▶ HTTP POST ─▶ stt_server (SenseVoice)
+双击左Ctrl按住 ─▶ 麦克风采集 ─▶ 临时 wav ─▶ HTTP POST ─▶ stt_server (SenseVoice)
                                                               │
             注入光标处 ◀─ 剪贴板+⌘V ◀────── 识别文字 ◀────────┘
 ```
@@ -40,14 +40,14 @@ python voice_ime.py
 ```
 
 点进任意输入框：
-- **长按左 Option 说话，松手** → 注入**原文**
-- **双击左 Control 并按住说话，松手** → LLM **整理后**注入（去口癖、补标点、顺句，不重写）
+- **双击左 Ctrl 并按住说话，松手** → 注入**原文**
+- **三击左 Ctrl 并按住说话，松手** → LLM **整理后**注入（去口癖、补标点、顺句，不重写）
 
 整理模式下声波浮窗变青色。整理需先配置 LLM（见下），未配置则注入原文。
 
 ### LLM 整理（可选）
 
-双击左 Control 触发的整理需要一个 OpenAI 兼容的 LLM。复制配置并填写：
+三击左 Ctrl 触发的整理需要一个 OpenAI 兼容的 LLM。复制配置并填写：
 
 ```bash
 cp llm_config.example.json llm_config.json
@@ -84,7 +84,6 @@ VOICE_IME_DEVICE='AirPods' python voice_ime.py   # 名字片段匹配
 | `NO_INJECT=1` | 只识别打印，不注入 |
 | `NO_OVERLAY=1` | 不显示声波浮窗 |
 | `VOICE_IME_DEVICE` | 指定输入设备（名字片段或索引） |
-| `VOICE_IME_HOTKEY` | 原文录音热键，默认 `left_option`。可改：`right_shift` / `right_option` / `left_option` / `right_cmd` / `right_ctrl` / `caps_lock`（整理热键固定为双击左 Control） |
 
 ## 打包成 .app（推荐）
 

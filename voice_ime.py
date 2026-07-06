@@ -297,7 +297,7 @@ def setup_menubar():
     _status_item.button().setTitle_("🎙")
     menu = NSMenu.alloc().init()
     info = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-        f"长按 {_hotkey_name}=原文  ·  双击左Ctrl=整理", "", ""
+        "双击左Ctrl按住=原文  ·  三击左Ctrl按住=整理", "", ""
     )
     info.setEnabled_(False)
     menu.addItem_(info)
@@ -412,38 +412,57 @@ def _transcribe(audio: np.ndarray, polish: bool = False):
         _set_icon("🎙")
 
 
-# ---------- 热键 ----------
-_last_ctrl_press = 0.0       # 上次左 Control 按下时间（双击检测）
-_other_since_ctrl = False    # 上次 Control 后是否按过别的键（排除组合键）
-_ctrl_recording = False      # 双击 Control 触发的录音进行中
+# ---------- 热键：双击左 Ctrl 并按住=原文，三击左 Ctrl 并按住=整理 ----------
+HOLD_DELAY = 0.25            # 最后一击按住多久判定为"开始录音"
+_tap_count = 0
+_last_tap = 0.0
+_other_since_ctrl = False    # Ctrl 后按过别的键（排除 ⌃C/⌃V 组合键）
+_ctrl_down = False           # 左 Ctrl 当前是否按着
+_ctrl_recording = False      # 多击触发的录音进行中
+_hold_timer = None
+
+
+def _hold_fire(cnt):
+    """最后一击按住 HOLD_DELAY 后仍未松开 → 按点击次数决定模式"""
+    global _ctrl_recording
+    if _ctrl_down and not _ctrl_recording and cnt >= 2:
+        _ctrl_recording = True
+        start_recording(polish=(cnt >= 3))  # 双击=原文，三击(及以上)=整理
 
 
 def on_press(key):
-    global _last_ctrl_press, _other_since_ctrl, _ctrl_recording
+    global _tap_count, _last_tap, _other_since_ctrl, _ctrl_down, _hold_timer
     try:
-        if key == HOTKEY:
-            start_recording(polish=False)
-        elif key == POLISH_KEY:
+        if key == POLISH_KEY:
             now = time.time()
-            if (now - _last_ctrl_press) < DOUBLE_TAP_SEC and not _other_since_ctrl:
-                _ctrl_recording = True
-                start_recording(polish=True)
-            _last_ctrl_press = now
+            if (now - _last_tap) < DOUBLE_TAP_SEC and not _other_since_ctrl:
+                _tap_count += 1
+            else:
+                _tap_count = 1
+            _last_tap = now
             _other_since_ctrl = False
+            _ctrl_down = True
+            if _hold_timer is not None:
+                _hold_timer.cancel()
+            _hold_timer = threading.Timer(HOLD_DELAY, _hold_fire, args=(_tap_count,))
+            _hold_timer.start()
         else:
-            _other_since_ctrl = True  # 排除 ⌃C/⌃V 等组合键误触发
+            _other_since_ctrl = True  # 排除组合键误触发
     except Exception as e:
         print(f"❌ on_press 异常: {e}", file=sys.stderr)
 
 
 def on_release(key):
-    global _ctrl_recording
+    global _ctrl_down, _ctrl_recording, _hold_timer
     try:
-        if key == HOTKEY:
-            stop_recording()
-        elif key == POLISH_KEY and _ctrl_recording:
-            _ctrl_recording = False
-            stop_recording()
+        if key == POLISH_KEY:
+            _ctrl_down = False
+            if _hold_timer is not None:
+                _hold_timer.cancel()
+                _hold_timer = None
+            if _ctrl_recording:
+                _ctrl_recording = False
+                stop_recording()
     except Exception as e:
         print(f"❌ on_release 异常: {e}", file=sys.stderr)
 
