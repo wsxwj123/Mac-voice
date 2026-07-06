@@ -20,22 +20,37 @@
 
 ## 安装
 
-需要 Python 3.10+ 和 [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg portaudio`）。
+仅 macOS。前置：**Python 3.10+**，以及 ffmpeg + portaudio：
+
+```bash
+brew install ffmpeg portaudio
+```
+
+然后：
 
 ```bash
 git clone https://github.com/wsxwj123/Mac-voice.git
 cd Mac-voice
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt      # ① 依赖含 torch，约 2GB，第一次较久
+python download_model.py             # ② 预下载 SenseVoice 模型（约 1GB）
 ```
+
+> **下载说明**：
+> - 依赖 (`torch` 等) + 模型加起来 **约 3GB**，第一次装要有心理预期。
+> - 模型从 **ModelScope（阿里）** 下载 —— 国内直连快，**国外可能较慢**。
+> - 仅首次需要联网，之后 STT 全程离线。
+> - `download_model.py` 只是提前把模型拉下来确认成功；跳过它也行，`stt_server.py` 首次启动会自动下载，但那时才发现下载失败就晚了。
 
 ## 运行
 
+需要两个进程（各开一个终端，或用下方的 .app + launchd 自启）：
+
 ```bash
-# 终端 1：STT 服务（首次会下载 ~1GB 模型到 ./models）
+# 终端 1：STT 服务（模型已预下载则秒起）
 python stt_server.py
 
-# 终端 2：输入法
+# 终端 2：输入法客户端
 python voice_ime.py
 ```
 
