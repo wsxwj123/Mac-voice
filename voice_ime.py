@@ -35,7 +35,7 @@ from AppKit import (
     NSApplication, NSPanel, NSColor, NSView, NSScreen, NSBezierPath,
     NSPasteboard, NSPasteboardTypeString,
     NSWindowStyleMaskBorderless, NSWindowStyleMaskNonactivatingPanel,
-    NSBackingStoreBuffered, NSFloatingWindowLevel,
+    NSBackingStoreBuffered, NSScreenSaverWindowLevel,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorStationary,
     NSApplicationActivationPolicyAccessory,
@@ -245,7 +245,7 @@ class Overlay:
             NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel,
             NSBackingStoreBuffered, False,
         )
-        self.panel.setLevel_(NSFloatingWindowLevel)
+        self.panel.setLevel_(NSScreenSaverWindowLevel)
         self.panel.setOpaque_(False)
         self.panel.setBackgroundColor_(NSColor.clearColor())
         self.panel.setIgnoresMouseEvents_(True)
