@@ -25,6 +25,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Mac-voice</string>
   <key>CFBundleIdentifier</key><string>io.macvoice.ime</string>
   <key>CFBundleExecutable</key><string>Mac-voice</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -43,6 +44,12 @@ export PYTHONUNBUFFERED=1
 exec "$PYTHON" voice_ime.py >> logs/app.log 2>&1
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Mac-voice"
+
+# 图标（若 AppIcon.icns 存在）
+if [ -f "$PROJECT_DIR/AppIcon.icns" ]; then
+  mkdir -p "$APP/Contents/Resources"
+  cp "$PROJECT_DIR/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 echo "✓ 生成 $APP"
 echo "  双击运行，或 open '$APP'"

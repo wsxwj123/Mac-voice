@@ -13,3 +13,7 @@ STATUS.md
 keytest.py
 com.wsxwj.*.plist
 llm_config.json
+
+# 图标中间产物
+icon_*.png
+*.iconset/
