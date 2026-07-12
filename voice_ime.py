@@ -45,6 +45,7 @@ from AppKit import (
 from Quartz import (
     CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap,
     CGEventSetFlags, kCGEventFlagMaskCommand,
+    CGEventKeyboardSetUnicodeString,
 )
 from ApplicationServices import (
     AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
@@ -143,8 +144,23 @@ def inject_text(text: str):
         _set_clipboard(old)
 
 
-# ---------- LLM 整理（OpenAI 兼容，失败回退原文） ----------
-def llm_polish(text: str) -> str:
+def type_text(s: str):
+    """CGEvent unicode 直接打字到光标处（流式注入用，不动剪贴板）"""
+    for i in range(0, len(s), 20):
+        chunk = s[i:i + 20]
+        n = len(chunk.encode("utf-16-le")) // 2
+        down = CGEventCreateKeyboardEvent(None, 0, True)
+        CGEventKeyboardSetUnicodeString(down, n, chunk)
+        CGEventPost(kCGHIDEventTap, down)
+        up = CGEventCreateKeyboardEvent(None, 0, False)
+        CGEventPost(kCGHIDEventTap, up)
+        time.sleep(0.004)
+
+
+# ---------- LLM 整理（OpenAI 兼容，流式，失败回退原文） ----------
+def llm_polish(text: str, on_token=None) -> str:
+    """整理文本。带 on_token 时流式回调每段增量（首 token ~0.4s 即到）；
+    返回完整整理结果；任何失败返回原文且不调 on_token。"""
     if not LLM_CONFIG or not LLM_CONFIG.get("base_url"):
         print("   ↳ ⚠️ 未配置 LLM（缺 llm_config.json），注入原文", file=sys.stderr)
         return text
@@ -157,7 +173,7 @@ def llm_polish(text: str) -> str:
                 {"role": "user", "content": f"<原始转写>\n{text}\n</原始转写>"},
             ],
             "temperature": 0,
-            "stream": False,
+            "stream": on_token is not None,
         }).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers={
             "Content-Type": "application/json",
@@ -170,10 +186,44 @@ def llm_polish(text: str) -> str:
         else:
             resp = urllib.request.urlopen(req, timeout=60)
         with resp:
-            data = json.loads(resp.read())
-        out = (data["choices"][0]["message"]["content"] or "").strip()
-        out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
-        return out or text
+            if on_token is None:
+                data = json.loads(resp.read())
+                out = (data["choices"][0]["message"]["content"] or "").strip()
+                out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
+                return out or text
+            # SSE 流式。in_think 过滤 <think> 块（deepseek-v4-flash 不产思考，兜底防换模型）
+            parts, buf, in_think = [], "", False
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", "ignore").strip()
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload == "[DONE]":
+                    break
+                delta = (json.loads(payload)["choices"][0]
+                         .get("delta", {}).get("content") or "")
+                if not delta:
+                    continue
+                buf += delta
+                if in_think:
+                    if "</think>" in buf:
+                        buf = buf.split("</think>", 1)[1]
+                        in_think = False
+                    else:
+                        continue
+                if "<think>" in buf:
+                    emit, rest = buf.split("<think>", 1)
+                    buf = rest
+                    in_think = True
+                else:
+                    emit, buf = buf, ""
+                if emit:
+                    if not parts:
+                        emit = emit.lstrip()  # 去掉开头空白/换行
+                    parts.append(emit)
+                    on_token(emit)
+            out = "".join(parts).strip()
+            return out or text
     except Exception as e:
         print(f"   ↳ ⚠️ LLM 整理失败，注入原文: {e}", file=sys.stderr)
         return text
@@ -453,8 +503,15 @@ def _transcribe(audio: np.ndarray, polish: bool = False):
         lang = result.get("language", "?")
         print(f"📝 「{text}」  [{lang} {emo} {ms}ms]")
         if text and polish:
-            text = llm_polish(text)
+            typed = []
+            def _emit(seg):
+                typed.append(seg)
+                type_text(seg)  # 边收边打字，首字 ~0.4s 即出
+            text = llm_polish(text, on_token=None if NO_INJECT else _emit)
             print(f"✨ 整理→「{text}」")
+            if typed:  # 已流式打完，不再粘贴
+                print("   ↳ 已流式注入光标处\n")
+                return
         if text and not NO_INJECT:
             try:
                 inject_text(text)
