@@ -12,3 +12,7 @@ pynput
 numpy
 pyobjc-framework-Cocoa
 pyobjc-framework-Quartz
+
+# streaming (2-pass: zipformer draft + SenseVoice final)
+sherpa-onnx
+websockets

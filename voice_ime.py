@@ -19,6 +19,7 @@ import re
 import sys
 import json
 import time
+import queue
 import tempfile
 import threading
 import urllib.request
@@ -38,6 +39,7 @@ from AppKit import (
     NSBackingStoreBuffered, NSScreenSaverWindowLevel,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorStationary,
+    NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSApplicationActivationPolicyAccessory,
     NSStatusBar, NSMenu, NSMenuItem, NSVariableStatusItemLength, NSAlert,
     NSTextField, NSAlertFirstButtonReturn,
@@ -56,7 +58,16 @@ from PyObjCTools import AppHelper
 
 # ---------- 配置 ----------
 STT_URL = "http://127.0.0.1:7788/transcribe_file"
+STREAM_URL = "ws://127.0.0.1:7788/stream"
 HEALTH_URL = "http://127.0.0.1:7788/health"
+STREAM = os.environ.get("NO_STREAM") != "1"   # 流式默认开，NO_STREAM=1 回退整段识别
+
+# bounded rewrite 黑名单：这些 App 里不做"退格重打"修正（终端/TUI 注入不可靠）
+REWRITE_BLACKLIST = {
+    "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp",
+    "net.kovidgoyal.kitty", "com.github.wez.wezterm", "io.alacritty",
+    "com.parsec.parsec",
+}
 SAMPLE_RATE = 16000          # SenseVoice 要求 16kHz
 MIN_DURATION = 0.3           # 短于此忽略（防误触）
 
@@ -145,16 +156,39 @@ def inject_text(text: str):
 
 
 def type_text(s: str):
-    """CGEvent unicode 直接打字到光标处（流式注入用，不动剪贴板）"""
+    """CGEvent unicode 直接打字到光标处（流式注入用，不动剪贴板）。
+    必须清零修饰键 flags：keycode 0 本质是 A 键，用户此刻还按着 Ctrl（热键），
+    不清零会被系统当成 Ctrl+A 触发用户自己的快捷键。"""
     for i in range(0, len(s), 20):
         chunk = s[i:i + 20]
         n = len(chunk.encode("utf-16-le")) // 2
         down = CGEventCreateKeyboardEvent(None, 0, True)
+        CGEventSetFlags(down, 0)
         CGEventKeyboardSetUnicodeString(down, n, chunk)
         CGEventPost(kCGHIDEventTap, down)
         up = CGEventCreateKeyboardEvent(None, 0, False)
+        CGEventSetFlags(up, 0)
         CGEventPost(kCGHIDEventTap, up)
         time.sleep(0.004)
+
+
+def backspace(n: int):
+    """退格 n 次（bounded rewrite 用，只删自己刚打的字）"""
+    DEL = 51  # kVK_Delete
+    for _ in range(n):
+        down = CGEventCreateKeyboardEvent(None, DEL, True)
+        CGEventSetFlags(down, 0)
+        CGEventPost(kCGHIDEventTap, down)
+        up = CGEventCreateKeyboardEvent(None, DEL, False)
+        CGEventSetFlags(up, 0)
+        CGEventPost(kCGHIDEventTap, up)
+        time.sleep(0.003)
+
+
+def frontmost_bundle_id():
+    from AppKit import NSWorkspace
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return app.bundleIdentifier() if app else None
 
 
 # ---------- LLM 整理（OpenAI 兼容，流式，失败回退原文） ----------
@@ -258,19 +292,12 @@ class WaveView(NSView):
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, rect):
-        w = rect.size.width
         h = rect.size.height
-        # 圆角半透明深色背景胶囊
-        bg = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            rect, h / 2.0, h / 2.0
-        )
-        NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.78).set()
-        bg.fill()
-        # 声波竖条（整理模式青色，普通白色）
+        # 无背景，只画声波竖条（原文=黑色，整理=红色）
         if _polish:
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.85, 0.95, 0.95).set()
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.92, 0.2, 0.2, 0.95).set()
         else:
-            NSColor.colorWithCalibratedWhite_alpha_(1.0, 0.95).set()
+            NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.9).set()
         mid_y = h / 2.0
         max_bar = h - 2 * PAD_Y
         for i, lv in enumerate(self.levels):
@@ -283,11 +310,15 @@ class WaveView(NSView):
 
 
 class Overlay:
-    """屏幕底部居中、无焦点的细长声波浮窗。"""
+    """屏幕底部居中、无焦点浮窗：声波 + 流式草稿文字行。"""
+
+    WAVE_H = 44.0
+    DRAFT_H = 24.0
 
     def __init__(self):
-        w = 2 * PAD_X + N_BARS * (BAR_W + BAR_GAP) - BAR_GAP
-        h = 44.0
+        self.wave_w = 2 * PAD_X + N_BARS * (BAR_W + BAR_GAP) - BAR_GAP
+        w = 560.0                      # 草稿文字需要宽度
+        h = self.WAVE_H + self.DRAFT_H
         screen = NSScreen.mainScreen().frame()
         x = (screen.size.width - w) / 2
         y = 16  # 贴屏幕最底部
@@ -306,9 +337,33 @@ class Overlay:
         self.panel.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
+            | NSWindowCollectionBehaviorFullScreenAuxiliary  # 全屏App之上也显示
         )
-        self.view = WaveView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
-        self.panel.setContentView_(self.view)
+        content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
+        self.panel.setContentView_(content)
+        # 声波居中放底部
+        self.view = WaveView.alloc().initWithFrame_(
+            NSMakeRect((w - self.wave_w) / 2, 0, self.wave_w, self.WAVE_H))
+        content.addSubview_(self.view)
+        # 草稿文字（声波上方，宽度随文字自适应的小圆角条；无草稿时不可见）
+        from AppKit import NSTextField, NSTextAlignmentCenter, NSFont
+        self.panel_w = w
+        self.draft_label = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(0, self.WAVE_H + 2, 10, self.DRAFT_H - 4))
+        self.draft_label.setBezeled_(False)
+        self.draft_label.setEditable_(False)
+        self.draft_label.setSelectable_(False)
+        self.draft_label.setAlignment_(NSTextAlignmentCenter)
+        self.draft_label.setTextColor_(NSColor.whiteColor())
+        self.draft_label.setFont_(NSFont.systemFontOfSize_(13))
+        self.draft_label.setDrawsBackground_(False)
+        from AppKit import NSShadow
+        shadow = NSShadow.alloc().init()
+        shadow.setShadowColor_(NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.9))
+        shadow.setShadowBlurRadius_(3.0)
+        self.draft_label.setShadow_(shadow)  # 黑阴影保证浅色背景可读
+        self.draft_label.setHidden_(True)
+        content.addSubview_(self.draft_label)
 
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
             0.05, True, lambda t: self._tick()
@@ -319,12 +374,27 @@ class Overlay:
             # sqrt 映射放大小音量，振幅更明显
             self.view.push(min(1.0, (_last_rms ** 0.5) * 3.8))
 
+    def set_draft(self, text: str):
+        """更新草稿（主线程调用）；条宽随文字自适应，超长只显尾部"""
+        if not text:
+            self.draft_label.setHidden_(True)
+            return
+        self.draft_label.setStringValue_(text[-38:])
+        self.draft_label.sizeToFit()
+        f = self.draft_label.frame()
+        bw = min(f.size.width + 4, self.panel_w - 20)
+        self.draft_label.setFrame_(NSMakeRect(
+            (self.panel_w - bw) / 2, self.WAVE_H + 2, bw, f.size.height))
+        self.draft_label.setHidden_(False)
+
     def show(self):
         self.view.reset()
+        self.set_draft("")
         self.panel.orderFrontRegardless()  # 不 makeKey，不抢焦点
 
     def hide(self):
         self.panel.orderOut_(None)
+        self.set_draft("")
 
 
 _overlay: "Overlay | None" = None
@@ -425,6 +495,113 @@ def _set_icon(emoji):
         AppHelper.callAfter(lambda: _status_item.button().setTitle_(emoji))
 
 
+# ---------- 流式会话（WS 客户端） ----------
+_session = None
+
+
+class StreamSession(threading.Thread):
+    """一次流式听写：发音频→收 draft/final；整理模式松手后 bounded rewrite。"""
+
+    def __init__(self, polish: bool):
+        super().__init__(daemon=True)
+        self.polish = polish
+        self.q = queue.Queue()
+        self.stopped = threading.Event()   # 松手
+        self.connected = threading.Event()
+        self.abort = False                 # 连接失败走批式回退时置位
+        self.finals = []
+        self.typed = 0                     # 已打进光标的字符数（回删上限）
+        self.target_app = None             # 开始打字时的前台 app
+
+    def run(self):
+        global _session
+        try:
+            from websockets.sync.client import connect
+            try:
+                ws = connect(STREAM_URL, open_timeout=10, close_timeout=3,
+                             proxy=None)
+            except TypeError:              # 旧版 websockets 无 proxy 参数
+                ws = connect(STREAM_URL, open_timeout=10, close_timeout=3)
+        except Exception as e:
+            print(f"⚠️ 流式连接失败({e})，本次回退整段识别", file=sys.stderr)
+            return
+        self.connected.set()
+        done = threading.Event()
+
+        def recv_loop():
+            try:
+                for msg in ws:
+                    if isinstance(msg, (bytes, bytearray)):
+                        continue
+                    ev = json.loads(msg)
+                    if self.abort:
+                        continue
+                    if ev["type"] == "draft":
+                        _ui(lambda t=ev["text"]: _overlay.set_draft(t))
+                    elif ev["type"] == "final":
+                        txt = ev["text"]
+                        print(f"⏺ 定稿: {txt}")
+                        if not NO_INJECT:
+                            if self.target_app is None:
+                                self.target_app = frontmost_bundle_id()
+                            type_text(txt)
+                            self.typed += len(txt)
+                        self.finals.append(txt)
+                        _ui(lambda: _overlay.set_draft(""))
+                    elif ev["type"] == "done":
+                        break
+            except Exception as e:
+                print(f"⚠️ 流式接收中断: {e}", file=sys.stderr)
+            finally:
+                done.set()
+
+        threading.Thread(target=recv_loop, daemon=True).start()
+        try:
+            while not (self.stopped.is_set() and self.q.empty()):
+                try:
+                    ws.send(self.q.get(timeout=0.1))
+                except queue.Empty:
+                    continue
+            ws.send(json.dumps({"type": "end"}))
+            done.wait(timeout=30)
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        if self.polish and self.finals and not self.abort and not NO_INJECT:
+            self._bounded_rewrite()
+        _session = None
+        _set_icon("🎙")
+
+    def _bounded_rewrite(self):
+        """LLM 整理后原地修正：只删自己刚打的 typed 个字符，环境变了就放弃。"""
+        raw = "".join(self.finals)
+        cur = frontmost_bundle_id()
+        if cur != self.target_app:
+            print(f"   ↳ ⚠️ 前台应用已变({self.target_app}→{cur})，保留原文不修正")
+            return
+        if cur in REWRITE_BLACKLIST:
+            print(f"   ↳ ⚠️ {cur} 在黑名单（终端类），保留原文不修正")
+            return
+        state = {"deleted": False}
+
+        def emit(seg):
+            if not state["deleted"]:
+                # 删除前最后一道校验：焦点仍未变才动手
+                if frontmost_bundle_id() != self.target_app:
+                    raise RuntimeError("焦点已变，放弃修正")
+                backspace(self.typed)
+                state["deleted"] = True
+            type_text(seg)
+
+        out = llm_polish(raw, on_token=emit)
+        if state["deleted"]:
+            print(f"✨ 修正为: {out}")
+        else:
+            print("   ↳ 整理未产出/被中止，保留原文")
+
+
 # ---------- 录音 ----------
 def _audio_callback(indata, frames, time_info, status):
     global _last_rms
@@ -434,10 +611,12 @@ def _audio_callback(indata, frames, time_info, status):
         if _recording:
             _frames.append(indata.copy())
             _last_rms = float(np.sqrt(np.mean(indata ** 2)))
+            if _session is not None:
+                _session.q.put(indata.tobytes())  # float32 PCM
 
 
 def start_recording(polish=False):
-    global _recording, _state, _polish
+    global _recording, _state, _polish, _session
     try:
         ensure_stream()  # 每次录音前确保用当前设备（耳机插拔自动跟随）
     except Exception as e:
@@ -448,6 +627,9 @@ def start_recording(polish=False):
             return
         _frames.clear()
         _recording = True
+        if STREAM:
+            _session = StreamSession(polish)
+            _session.start()
     _polish = polish
     _state = "recording"
     print("🎙️  录音中…（松手结束）" + ("  [整理模式]" if polish else ""))
@@ -456,31 +638,48 @@ def start_recording(polish=False):
 
 
 def stop_recording():
-    global _recording, _state
+    global _recording, _state, _session
     with _lock:
         if not _recording:
             return
         _recording = False
         frames = list(_frames)
         _frames.clear()
+        session = _session
+
+    _state = "hidden"
+    _ui(lambda: _overlay.hide())
 
     if not frames:
-        _state = "hidden"
-        _ui(lambda: _overlay.hide())
         _set_icon("🎙")
         return
     audio = np.concatenate(frames, axis=0).reshape(-1)
     duration = len(audio) / SAMPLE_RATE
     if duration < MIN_DURATION:
         print(f"（太短 {duration:.2f}s，忽略）")
-        _state = "hidden"
-        _ui(lambda: _overlay.hide())
+        if session is not None:
+            session.abort = True
+            session.stopped.set()
         _set_icon("🎙")
         return
 
+    # 诊断+救回用：保留最近一次完整录音
+    try:
+        sf.write(str(Path(__file__).parent / "logs" / "last_rec.wav"),
+                 audio, SAMPLE_RATE)
+    except Exception:
+        pass
+
+    if session is not None:
+        session.connected.wait(timeout=1.0)
+        if session.connected.is_set():
+            session.stopped.set()   # 流式路径：发 end，收尾在会话线程完成
+            return
+        session.abort = True        # 连接失败 → 回退整段识别
+        session.stopped.set()
+        _session = None
+
     print(f"⏳ 识别中… ({duration:.1f}s)")
-    _state = "hidden"
-    _ui(lambda: _overlay.hide())  # 松手即消失，识别在后台静默
     threading.Thread(target=_transcribe, args=(audio, _polish), daemon=True).start()
 
 

@@ -3,7 +3,8 @@
 本地、隐私优先的 macOS 语音输入法。按住热键说话，松手把识别文字注入当前光标处。
 
 - **STT**: [SenseVoice-Small](https://github.com/FunAudioLLM/SenseVoice)（本地 CPU 推理，中文 CER ~3%，支持中英日韩粤 + 情绪/事件识别）
-- **交互**: push-to-talk（双击左 Ctrl 按住说话 → 松手 → 注入），录音时屏幕底部显示实时声波
+- **流式**: 边说边出字（2-pass：sherpa-onnx zipformer 实时草稿+断句 → 每句停顿后 SenseVoice 定稿打进光标，准确率不打折）
+- **交互**: push-to-talk（双击左 Ctrl 按住说话），屏幕底部实时声波 + 草稿字幕
 - **注入**: 剪贴板 + 模拟 ⌘V，兼容所有 App，注入后恢复原剪贴板
 - **菜单栏图标**: 🎙 空闲 / 🔴 录音 / 🔵 整理中，含退出菜单
 - 全程本地，不联网，无云 API（整理走 LLM 时除非用云端）
@@ -11,12 +12,16 @@
 ## 架构
 
 ```
-双击左Ctrl按住 ─▶ 麦克风采集 ─▶ 临时 wav ─▶ HTTP POST ─▶ stt_server (SenseVoice)
-                                                              │
-            注入光标处 ◀─ 剪贴板+⌘V ◀────── 识别文字 ◀────────┘
+双击左Ctrl按住 ─▶ 麦克风 ─▶ WebSocket /stream ─▶ zipformer 实时草稿+endpoint断句
+                                │                     │(每句停顿 ~0.8s)
+                浮窗草稿字幕 ◀──┘      SenseVoice 定稿 ─▶ CGEvent 打字进光标
 ```
 
-两个进程：`stt_server.py`（常驻 STT 服务，127.0.0.1:7788）+ `voice_ime.py`（输入法客户端）。
+两个进程：`stt_server.py`（常驻 STT 服务，127.0.0.1:7788，含 /stream 流式端点）+ `voice_ime.py`（输入法客户端）。
+
+> 为什么是 2-pass：SenseVoice 架构不支持流式；FunASR paraformer-zh-streaming 实测在
+> Apple Silicon CPU 上 RTF>1 跑不了实时。sherpa-onnx 流式 zipformer（14M int8）
+> 100ms 块解码仅 ~1ms，负责草稿和断句；定稿仍由 SenseVoice 保证准确率。
 
 ## 安装
 
@@ -34,6 +39,11 @@ cd Mac-voice
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt      # ① 依赖含 torch，约 2GB，第一次较久
 python download_model.py             # ② 预下载 SenseVoice 模型（约 1GB）
+
+# ③ 流式草稿模型（sherpa-onnx zipformer 中文，~74MB，GitHub releases）
+M=sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23
+curl -L -o $M.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$M.tar.bz2"
+tar xjf $M.tar.bz2 -C models/ && rm $M.tar.bz2
 ```
 
 > **下载说明**：
@@ -55,10 +65,11 @@ python voice_ime.py
 ```
 
 点进任意输入框：
-- **双击左 Ctrl 并按住说话，松手** → 注入**原文**
-- **三击左 Ctrl 并按住说话，松手** → LLM **整理后**注入（去口癖、补标点、顺句，不重写）
+- **双击左 Ctrl 并按住说话**（黑色声波）→ 边说边逐句出字，句间停顿 ~0.8s 即定稿注入
+- **三击左 Ctrl 并按住说话**（红色声波）→ 同样流式出原文；松手后 LLM 整理，
+  焦点未变则原地替换为整理稿（微信键盘式；焦点变了/终端类 App 自动放弃替换保原文）
 
-整理模式下声波浮窗变青色。整理需先配置 LLM（见下），未配置则注入原文。
+整理需先配置 LLM（见下），未配置则保留原文。
 
 ### LLM 整理（可选）
 
@@ -98,6 +109,9 @@ VOICE_IME_DEVICE='AirPods' python voice_ime.py   # 名字片段匹配
 |---|---|
 | `NO_INJECT=1` | 只识别打印，不注入 |
 | `NO_OVERLAY=1` | 不显示声波浮窗 |
+| `NO_STREAM=1` | 关闭流式，回退松手后整段识别 |
+| `STREAM_END_SILENCE_MS` | 断句静音阈值，默认 800（服务端） |
+| `STREAM_MODEL_DIR` | zipformer 模型目录（默认 models/ 下） |
 | `VOICE_IME_DEVICE` | 指定输入设备（名字片段或索引） |
 
 ## 打包成 .app（推荐）

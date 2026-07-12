@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 ROOT = Path(__file__).parent
 MODEL_CACHE = ROOT / "models"
 MODEL_CACHE.mkdir(exist_ok=True)
-os.environ["MODELSCOPE_CACHE"] = str(MODEL_CACHE)
+os.environ.setdefault("MODELSCOPE_CACHE", str(MODEL_CACHE))
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -113,6 +113,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# 流式识别端点（/stream WebSocket，2-pass）
+import stream_asr
+
+
+def _offline_model_sync():
+    while _model is None:          # lifespan 已预热，一般不等待
+        time.sleep(0.5)
+    return _model
+
+
+stream_asr.set_offline_model_getter(_offline_model_sync)
+app.include_router(stream_asr.router)
 
 
 class TranscribeReq(BaseModel):
