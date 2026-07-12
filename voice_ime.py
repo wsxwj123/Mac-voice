@@ -574,33 +574,36 @@ def pick_input_device():
 
 
 def ensure_stream():
-    """确保音频流绑定当前应选设备；设备变化(耳机插拔)则重建。每次录音前调用。"""
+    """每次录音前重建音频流。
+
+    必须先重新初始化 PortAudio：它的设备表是进程启动时的快照，
+    之后插拔的耳机完全不可见（曾导致 5 天前的旧进程永远录不到新连的 AirPods）。
+    reinit ~3ms + 开流 ~100ms，藏在热键判定延迟里，无感。"""
     global _stream, _stream_dev_name
-    dev = pick_input_device()
-    try:
-        name = sd.query_devices(dev, kind="input")["name"]
-    except Exception:
-        name = None
-    if _stream is not None and name == _stream_dev_name:
-        return  # 设备没变，复用现有流（无延迟）
-    if _stream is not None:  # 设备变了，关掉旧流
+    if _stream is not None:
         try:
             _stream.stop()
             _stream.close()
         except Exception:
             pass
         _stream = None
-    avail = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+    sd._terminate()
+    sd._initialize()  # 刷新设备表，热插拔的耳机才可见
+    dev = pick_input_device()
+    name = sd.query_devices(dev, kind="input")["name"]
     _stream = sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
         device=dev, callback=_audio_callback,
     )
     _stream.start()
+    if name != _stream_dev_name:
+        _stream_dev_name = name
+        avail = [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+        print(f"🎤 输入设备: {name}  | 可用: {avail}")
+        if any(h in name.lower() for h in VIRTUAL_HINTS):
+            print("⚠️  虚拟驱动，可能录不到人声。连接耳机或在 声音→输入 选麦克风。",
+                  file=sys.stderr)
     _stream_dev_name = name
-    print(f"🎤 输入设备: {name}  | 可用: {avail}")
-    if any(h in (name or "").lower() for h in VIRTUAL_HINTS):
-        print("⚠️  仍是虚拟驱动，可能录不到人声。连接 AirPods 或在 声音→输入 选麦克风。",
-              file=sys.stderr)
 
 
 def main():
